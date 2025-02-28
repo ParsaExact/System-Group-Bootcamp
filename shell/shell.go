@@ -25,8 +25,9 @@ var builtins = map[string]bool{
 	"cd":      true,
 	"login":   true,
 	"logout":  true,
-	"adviser": true,
+	"adduser": true,
 	"history": true,
+	"ls":      true,
 }
 
 func main() {
@@ -102,6 +103,8 @@ func main() {
 			} else {
 				handleHistory(currentUser, db, sessionHistory)
 			}
+		case "ls":
+			handleLs(cmdArgs)
 		default:
 			if builtins[cmd] {
 				fmt.Fprintf(os.Stderr, "%s: built-in command not implemented\n", cmd)
@@ -151,7 +154,11 @@ func handleExit(args []string) {
 	}()
 
 	if len(processedArgs) > 1 {
-		fmt.Println("exit: too many arguments")
+		if stderrFile != nil {
+			fmt.Fprintln(stderrFile, "exit: too many arguments")
+		} else {
+			fmt.Println("exit: too many arguments")
+		}
 		return
 	}
 
@@ -159,7 +166,11 @@ func handleExit(args []string) {
 	if len(processedArgs) == 1 {
 		_, err := fmt.Sscanf(processedArgs[0], "%d", &code)
 		if err != nil {
-			fmt.Println("exit: invalid status code")
+			if stderrFile != nil {
+				fmt.Fprintln(stderrFile, "exit: invalid status code")
+			} else {
+				fmt.Println("exit: invalid status code")
+			}
 			return
 		}
 	}
@@ -207,8 +218,13 @@ func handleEcho(args []string) {
 			stripped := arg[1 : len(arg)-1]
 			processed := processEscapes(stripped)
 			output.WriteString(replaceEnvVars(processed))
+		} else if !strings.HasPrefix(arg, "'") || !strings.HasSuffix(arg, "'") {
+			output.WriteString(replaceEnvVars(arg))
 		} else {
-			output.WriteString(arg) // Treat as literal
+			stripped := arg[1 : len(arg)-1]
+			processed := processEscapes(stripped)
+			output.WriteString(processed)
+			// output.WriteString(arg)
 		}
 		output.WriteString(" ")
 	}
@@ -221,6 +237,7 @@ func handleEcho(args []string) {
 		fmt.Println(result)
 	}
 }
+
 func replaceEnvVars(s string) string {
 	re := regexp.MustCompile(`\$([A-Za-z_][A-Za-z0-9_]*)`)
 	return re.ReplaceAllStringFunc(s, func(m string) string {
@@ -239,13 +256,21 @@ func handleCat(args []string) {
 	}()
 
 	if len(processedArgs) == 0 {
-		fmt.Println("cat: missing file argument")
+		if stderrFile != nil {
+			fmt.Fprintln(stderrFile, "cat: missing file argument")
+		} else {
+			fmt.Fprintln(os.Stderr, "cat: missing file argument")
+		}
 		return
 	}
 	for _, file := range processedArgs {
 		content, err := os.ReadFile(file)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "cat: %v\n", err)
+			if stderrFile != nil {
+				fmt.Fprintf(stderrFile, "cat: %v\n", err)
+			} else {
+				fmt.Fprintf(os.Stderr, "cat: %v\n", err)
+			}
 			continue
 		}
 		if stdoutFile != nil {
@@ -267,7 +292,11 @@ func handleType(args []string) {
 	}()
 
 	if len(processedArgs) == 0 {
-		fmt.Println("type: missing argument")
+		if stderrFile != nil {
+			fmt.Fprintln(stderrFile, "type: missing argument")
+		} else {
+			fmt.Println("type: missing argument")
+		}
 		return
 	}
 	cmd := processedArgs[0]
@@ -295,8 +324,8 @@ func handleType(args []string) {
 		}
 	}
 	output := fmt.Sprintf("%s: command not found\n", cmd)
-	if stdoutFile != nil {
-		fmt.Fprint(stdoutFile, output)
+	if stderrFile != nil {
+		fmt.Fprint(stderrFile, output)
 	} else {
 		fmt.Print(output)
 	}
@@ -316,7 +345,11 @@ func handleCd(args []string) {
 	if len(processedArgs) == 0 {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "cd:", err)
+			if stderrFile != nil {
+				fmt.Fprintf(stderrFile, "cd: %v\n", err)
+			} else {
+				fmt.Fprintf(os.Stderr, "cd: %v\n", err)
+			}
 			return
 		}
 		target = home
@@ -325,61 +358,118 @@ func handleCd(args []string) {
 	}
 
 	if err := os.Chdir(target); err != nil {
-		fmt.Fprintf(os.Stderr, "cd: %v\n", err)
+		if stderrFile != nil {
+			fmt.Fprintf(stderrFile, "cd: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "cd: %v\n", err)
+		}
 	}
 }
 
 // User Management
 func handleAddUser(args []string, db *sql.DB) {
-	if len(args) < 1 || len(args) > 2 {
-		fmt.Println("adviser: invalid arguments")
+	stdoutFile, stderrFile, processedArgs := processRedirection(args)
+	defer func() {
+		if stdoutFile != nil {
+			stdoutFile.Close()
+		}
+		if stderrFile != nil {
+			stderrFile.Close()
+		}
+	}()
+
+	if len(processedArgs) < 1 || len(processedArgs) > 2 {
+		if stderrFile != nil {
+			fmt.Fprintln(stderrFile, "adduser: invalid arguments")
+		} else {
+			fmt.Println("adduser: invalid arguments")
+		}
 		return
 	}
-	username := args[0]
+	username := processedArgs[0]
 	password := ""
-	if len(args) == 2 {
-		password = args[1]
+	if len(processedArgs) == 2 {
+		password = processedArgs[1]
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		fmt.Println("Error creating user:", err)
+		if stderrFile != nil {
+			fmt.Fprintf(stderrFile, "Error creating user: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error creating user: %v\n", err)
+		}
 		return
 	}
 
 	_, err = db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)", username, hashed)
 	if err != nil {
-		fmt.Println("duplicate user exists with this username")
+		if stderrFile != nil {
+			fmt.Fprintln(stderrFile, "duplicate user exists with this username")
+		} else {
+			fmt.Println("duplicate user exists with this username")
+		}
 	} else {
-		fmt.Println("user created successfully")
+		if stdoutFile != nil {
+			fmt.Fprintln(stdoutFile, "user created successfully")
+		} else {
+			fmt.Println("user created successfully")
+		}
 	}
 }
 
 func handleLogin(args []string, db *sql.DB, currentUser *string) {
-	if len(args) < 1 || len(args) > 2 {
-		fmt.Println("login: invalid arguments")
+	stdoutFile, stderrFile, processedArgs := processRedirection(args)
+	defer func() {
+		if stdoutFile != nil {
+			stdoutFile.Close()
+		}
+		if stderrFile != nil {
+			stderrFile.Close()
+		}
+	}()
+
+	if len(processedArgs) < 1 || len(processedArgs) > 2 {
+		if stderrFile != nil {
+			fmt.Fprintln(stderrFile, "login: invalid arguments")
+		} else {
+			fmt.Println("login: invalid arguments")
+		}
 		return
 	}
-	username := args[0]
+	username := processedArgs[0]
 	password := ""
-	if len(args) == 2 {
-		password = args[1]
+	if len(processedArgs) == 2 {
+		password = processedArgs[1]
 	}
 
 	var storedHash string
 	err := db.QueryRow("SELECT password_hash FROM users WHERE username = ?", username).Scan(&storedHash)
 	if err != nil {
-		fmt.Println("login: user not found")
+		if stderrFile != nil {
+			fmt.Fprintln(stderrFile, "login: user not found")
+		} else {
+			fmt.Println("login: user not found")
+		}
 		return
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(password))
 	if err != nil {
-		fmt.Println("login: incorrect password")
+		if stderrFile != nil {
+			fmt.Fprintln(stderrFile, "login: incorrect password")
+		} else {
+			fmt.Println("login: incorrect password")
+		}
 		return
 	}
 
 	*currentUser = username
+	if stdoutFile != nil {
+		fmt.Fprintln(stdoutFile, "login successful")
+	} else {
+		fmt.Println("login successful")
+	}
 }
 
 // History Management
@@ -453,79 +543,76 @@ func handleHistory(currentUser string, db *sql.DB, sessionHistory []string) {
 	}
 }
 
+func handleLs(args []string) {
+	stdoutFile, stderrFile, processedArgs := processRedirection(args)
+	defer func() {
+		if stdoutFile != nil {
+			stdoutFile.Close()
+		}
+		if stderrFile != nil {
+			stderrFile.Close()
+		}
+	}()
+
+	dir := "."
+	if len(processedArgs) > 0 {
+		dir = processedArgs[0]
+	}
+
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ls: %v\n", err)
+		return
+	}
+
+	var output strings.Builder
+	for _, file := range files {
+		output.WriteString(file.Name())
+		output.WriteString(" ")
+	}
+	output.WriteString("\n")
+
+	result := output.String()
+	if stdoutFile != nil {
+		fmt.Fprint(stdoutFile, result)
+	} else {
+		fmt.Print(result)
+	}
+}
+
 // External Command Execution
 func executeExternalCommand(cmdName string, args []string) {
-	var stdoutFile, stderrFile *os.File
-	var newArgs []string
-
-	// redirection operators
-	for i := 0; i < len(args); {
-		arg := args[i]
-		switch arg {
-		case ">", ">>", "1>", "1>>":
-			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "syntax error: no file specified for output redirection")
-				return
-			}
-			filename := args[i+1]
-			flag := os.O_WRONLY | os.O_CREATE
-			if arg == ">" || arg == "1>" {
-				flag |= os.O_TRUNC
-			} else {
-				flag |= os.O_APPEND
-			}
-			file, err := os.OpenFile(filename, flag, 0644)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "error opening file: %v\n", err)
-				return
-			}
-			stdoutFile = file
-			i += 2
-		case "2>", "2>>":
-			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "syntax error: no file specified for error redirection")
-				return
-			}
-			filename := args[i+1]
-			flag := os.O_WRONLY | os.O_CREATE
-			if arg == "2>" {
-				flag |= os.O_TRUNC
-			} else {
-				flag |= os.O_APPEND
-			}
-			file, err := os.OpenFile(filename, flag, 0644)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "error opening file: %v\n", err)
-				return
-			}
-			stderrFile = file
-			i += 2
-		default:
-			newArgs = append(newArgs, arg)
-			i++
+	stdoutFile, stderrFile, newArgs := processRedirection(args)
+	defer func() {
+		if stdoutFile != nil {
+			stdoutFile.Close()
 		}
-	}
+		if stderrFile != nil {
+			stderrFile.Close()
+		}
+	}()
 
 	cmd := exec.Command(cmdName, newArgs...)
 	cmd.Stdin = os.Stdin
 
-	// Redirect stdout/stderr
 	if stdoutFile != nil {
 		cmd.Stdout = stdoutFile
-		defer stdoutFile.Close()
 	} else {
 		cmd.Stdout = os.Stdout
 	}
 
 	if stderrFile != nil {
 		cmd.Stderr = stderrFile
-		defer stderrFile.Close()
 	} else {
 		cmd.Stderr = os.Stderr
 	}
 
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error executing command: %v\n", err)
+		if stderrFile != nil {
+			fmt.Fprintf(stderrFile, "error executing command: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "error executing command: %v\n", err)
+		}
 	}
 }
 func splitArgs(line string) []string {
@@ -566,20 +653,25 @@ func splitArgs(line string) []string {
 		if r == '\'' && !inDouble {
 			if inSingle {
 				inSingle = false
-				if buf.Len() > 0 {
-					args = append(args, buf.String())
-					buf.Reset()
-				}
+				buf.WriteRune(r)
+				args = append(args, buf.String())
+				buf.Reset()
 			} else {
 				inSingle = true
 				if buf.Len() > 0 {
 					args = append(args, buf.String())
 					buf.Reset()
 				}
+				buf.WriteRune(r)
 			}
 			continue
 		} else if r == '"' && !inSingle {
 			inDouble = !inDouble
+			buf.WriteRune(r)
+			if !inDouble {
+				args = append(args, buf.String())
+				buf.Reset()
+			}
 			continue
 		} else if (r == ' ' || r == '\t') && !inSingle && !inDouble {
 			if buf.Len() > 0 {
