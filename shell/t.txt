@@ -1,0 +1,49 @@
+echo hi
+echo 'no$PATH'      yes
+echo $PATH
+
+exit
+exit 21
+exit 1 2
+
+type go
+type ls
+type unknown
+
+code .
+
+pwd
+pwd > 1.txt
+cat 1.txt
+ls >> 1.txt
+cat 1.txt
+cd unknownfolder
+cd /home/parsis/go/src
+cd shell
+
+unknowncommand
+
+adduser parsa 123
+login parsa 456
+login parsa 123
+pwd
+ls
+pwd
+ls
+history
+history clean
+logout
+history
+
+echo hello System Group 1> 1.txt
+cat unknownfile 2> 2.txt
+cat 1.txt
+cat 2.txt
+
+echo "This is a \"quoted\" word."
+
+echo "ab \a \$ \` \" \\"
+
+
+
+

@@ -1,0 +1,14 @@
+$ echo hello
+hello
+
+$ type v2ray
+v2ray is /var/lib/snapd/snap/bin/v2ray
+
+$ type
+type: missing argument
+
+$ type kir
+kir: command not found
+
+$ type go
+go is /usr/bin/go
